@@ -1,213 +1,85 @@
 # Surveys Spec
 
-## Endpoints
+## 1. Objetivo y Contexto
 
-| Método | Endpoint | Descripción | Autenticación |
-|--------|----------|-------------|---------------|
-| POST | `/api/v1/events/:id/surveys` | Enviar encuesta | Sí |
-| GET | `/api/v1/events/:id/surveys` | Listar respuestas | Sí (organizer) |
-| GET | `/api/v1/events/:id/surveys/stats` | Estadísticas de encuesta | Sí (organizer) |
+El módulo de encuestas permite recolectar feedback post-evento de los participantes en la plataforma **Academic Event Manager**. Los organizadores pueden ver las respuestas y estadísticas agregadas para evaluar la calidad de sus eventos. Las encuestas alimentan los informes del evento con métricas de satisfacción.
+
+**Tipos de preguntas:** rating (1-5), texto abierto, booleano.
 
 ---
 
-## POST /api/v1/events/:id/surveys
+## 2. Historias de Usuario y Criterios de Aceptación
 
-### Descripción
+### HU-S1: Participante envía encuesta post-evento
 
-Permite a un participante registrado enviar su evaluación de satisfacción post-evento.
+**Como** participante acreditado, **quiero** completar una encuesta de satisfacción después del evento, **para** compartir mi experiencia y sugerencias.
 
-### Restricciones
+**Criterios de aceptación:**
+- Solo usuarios inscritos y acreditados en el evento pueden responder
+- Solo una encuesta por usuario por evento
+- La encuesta está disponible solo después de la fecha de fin del evento
+- Una vez enviada, la encuesta no es editable
+- Las preguntas requeridas deben responderse obligatoriamente
+- Se devuelven los 7 campos de respuesta: 4 ratings, 1 booleano, 2 textos
 
-- Solo usuarios **inscritos y acreditados** en el evento pueden responder
-- **Una encuesta por usuario por evento**
-- Disponible solo **después de la fecha de fin del evento**
-- No editable una vez enviada
+### HU-S2: Organizador ve respuestas de encuestas
 
-### Request Body
+**Como** organizador de un evento, **quiero** ver todas las respuestas de encuestas, **para** analizar el feedback de los participantes.
 
-```json
-{
-  "responses": [
-    {
-      "questionId": "q1",
-      "question": "Calificación general del evento",
-      "type": "rating",
-      "value": 5
-    },
-    {
-      "questionId": "q2",
-      "question": "¿Qué le pareció la organización?",
-      "type": "rating",
-      "value": 4
-    },
-    {
-      "questionId": "q3",
-      "question": "Comentarios adicionales",
-      "type": "text",
-      "value": "Excelente evento, muy bien organizado"
-    },
-    {
-      "questionId": "q4",
-      "question": "¿Recomendaría este evento?",
-      "type": "boolean",
-      "value": true
-    }
-  ]
-}
-```
+**Criterios de aceptación:**
+- Solo el organizador del evento (o admin) puede ver las respuestas
+- Las respuestas se muestran paginadas (default: 20 por página)
+- Se muestran respuestas anonimizadas (userId visible pero sin datos personales)
+- Si no hay respuestas, se indica claramente
 
-### Validación (Zod)
+### HU-S3: Organizador ve estadísticas de encuestas
 
-```typescript
-const surveyResponseSchema = z.object({
-  questionId: z.string().uuid(),
-  question: z.string().min(1, "La pregunta es requerida"),
-  type: z.enum(["rating", "text", "boolean"]),
-  value: z.union([
-    z.number().min(1).max(5), // rating
-    z.string(),                // text
-    z.boolean(),               // boolean
-  ]),
-});
+**Como** organizador, **quiero** ver estadísticas agregadas de las encuestas, **para** tener una visión rápida del nivel de satisfacción.
 
-const surveySchema = z.object({
-  responses: z
-    .array(surveyResponseSchema)
-    .min(1, "Debe incluir al menos una respuesta")
-    .max(20, "Máximo 20 preguntas por encuesta"),
-});
-```
-
-### Response (201)
-
-```json
-{
-  "success": true,
-  "data": {
-    "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-    "eventId": "e1f2g3h4-i5j6-7890-abcd-ef1234567890",
-    "userId": "u1v2w3x4-y5z6-7890-abcd-ef1234567890",
-    "responses": [
-      {
-        "questionId": "q1",
-        "question": "Calificación general del evento",
-        "type": "rating",
-        "value": 5
-      }
-    ],
-    "submittedAt": "2025-06-20T18:30:00.000Z"
-  },
-  "message": "Encuesta enviada exitosamente"
-}
-```
-
-### Errores
-
-| Código | HTTP | Escenario |
-|--------|------|-----------|
-| `NOT_FOUND` | 404 | Evento no encontrado |
-| `AUTH_REQUIRED` | 401 | No autenticado |
-| `INSUFFICIENT_PERMISSIONS` | 403 | No inscrito en el evento |
-| `CONFLICT` | 409 | Ya envió encuesta para este evento |
-| `VALIDATION_ERROR` | 400 | Datos inválidos |
-| `CONFLICT` | 409 | El evento aún no ha finalizado |
+**Criterios de aceptación:**
+- Muestra total de respuestas y tasa de respuesta (respuestas / acreditados)
+- Muestra promedio general de ratings (escala 1-5)
+- Muestra distribución de ratings (cuántos 1, 2, 3, 4, 5)
+- Muestra palabras clave más frecuentes en comentarios
+- Muestra score de sentimiento (0-1) calculado sobre respuestas de texto
+- Solo accesible para organizador del evento o admin
 
 ---
 
-## GET /api/v1/events/:id/surveys
+## 3. Requisitos Funcionales y Reglas de Negocio
 
-### Descripción
+### RF-S1: Envío de encuestas
+- Endpoint: `POST /api/v1/events/:id/surveys`
+- Máximo 20 preguntas por encuesta
+- Las respuestas se validan con esquema Zod según tipo
 
-Lista todas las respuestas de encuestas para un evento. Solo accesible para el organizador.
+### RF-S2: Listado de respuestas
+- Endpoint: `GET /api/v1/events/:id/surveys`
+- Soporte de paginación: `page` (default 1), `limit` (default 20, máx 100)
+- Formato de respuesta estándar con `meta` de paginación
 
-### Query Params
+### RF-S3: Estadísticas
+- Endpoint: `GET /api/v1/events/:id/surveys/stats`
+- Respuesta incluye: `totalResponses`, `responseRate`, `averageRating`, `ratingDistribution`, `topKeywords`, `sentimentScore`
 
-| Parámetro | Tipo | Default | Descripción |
-|-----------|------|---------|-------------|
-| `page` | `number` | 1 | Página |
-| `limit` | `number` | 20 | Por página (máx: 100) |
+### RF-S4: Preguntas por defecto
 
-### Response (200)
+| # | Pregunta | Tipo | Requerida |
+|---|----------|------|-----------|
+| 1 | Calificación general del evento | rating (1-5) | Sí |
+| 2 | Calidad del contenido | rating (1-5) | Sí |
+| 3 | Calidad de los expositores | rating (1-5) | Sí |
+| 4 | Organización del evento | rating (1-5) | Sí |
+| 5 | ¿Recomendaría este evento? | boolean | Sí |
+| 6 | Comentarios adicionales | text | No |
+| 7 | Sugerencias de mejora | text | No |
 
-```json
-{
-  "success": true,
-  "data": [
-    {
-      "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-      "userId": "u1v2w3x4-y5z6-7890-abcd-ef1234567890",
-      "responses": [
-        {
-          "questionId": "q1",
-          "type": "rating",
-          "value": 5
-        }
-      ],
-      "submittedAt": "2025-06-20T18:30:00.000Z"
-    }
-  ],
-  "meta": {
-    "page": 1,
-    "limit": 20,
-    "total": 45,
-    "totalPages": 3
-  }
-}
-```
-
-### Errores
-
-| Código | HTTP | Escenario |
-|--------|------|-----------|
-| `NOT_FOUND` | 404 | Evento no encontrado |
-| `INSUFFICIENT_PERMISSIONS` | 403 | No es organizador del evento |
-
----
-
-## GET /api/v1/events/:id/surveys/stats
-
-### Descripción
-
-Estadísticas agregadas de las encuestas de un evento. Solo accesible para el organizador.
-
-### Response (200)
-
-```json
-{
-  "success": true,
-  "data": {
-    "totalResponses": 45,
-    "responseRate": 0.75,
-    "averageRating": 4.3,
-    "ratingDistribution": {
-      "1": 2,
-      "2": 3,
-      "3": 5,
-      "4": 15,
-      "5": 20
-    },
-    "topKeywords": ["organización", "contenido", "expositores"],
-    "sentimentScore": 0.85
-  }
-}
-```
-
-### Errores
-
-| Código | HTTP | Escenario |
-|--------|------|-----------|
-| `NOT_FOUND` | 404 | Evento no encontrado |
-| `INSUFFICIENT_PERMISSIONS` | 403 | No es organizador del evento |
-
----
-
-## Modelo de Datos (Survey)
-
+### RF-S5: Modelo de datos
 ```typescript
 interface Survey {
-  id: string;           // UUID
-  eventId: string;      // UUID - FK a Event
-  userId: string;       // UUID - FK a User
+  id: string;
+  eventId: string;
+  userId: string;
   responses: SurveyResponse[];
   submittedAt: Date;
   createdAt: Date;
@@ -222,33 +94,78 @@ interface SurveyResponse {
 }
 ```
 
-### Relaciones
+### RB-S1: Una encuesta por usuario por evento
+Si un usuario ya envió encuesta para un evento, se devuelve 409 `CONFLICT`.
 
-```
-Survey ────< SurveyResponse
-   │
-   ├──> Event (1:1)
-   └──> User (1:1)
-```
+### RB-S2: Disponible solo post-evento
+La encuesta solo puede enviarse después de la fecha de fin del evento.
 
----
+### RB-S3: No editable
+Una vez enviada, la encuesta no puede modificarse ni eliminarse.
 
-## Preguntas por Defecto
-
-| # | Pregunta | Tipo | Requerida |
-|---|----------|------|-----------|
-| 1 | Calificación general del evento | rating (1-5) | Sí |
-| 2 | Calidad del contenido | rating (1-5) | Sí |
-| 3 | Calidad de los expositores | rating (1-5) | Sí |
-| 4 | Organización del evento | rating (1-5) | Sí |
-| 5 | ¿Recomendaría este evento? | boolean | Sí |
-| 6 | Comentarios adicionales | text | No |
-| 7 | Sugerencias de mejora | text | No |
+### RB-S4: Integración con Reports
+Las estadísticas de encuestas se incluyen en los informes del evento (`GET /api/v1/events/:id/reports`). `responseRate` = encuestas enviadas / participantes acreditados.
 
 ---
 
-## Integración con Reports
+## 4. Restricciones Técnicas del Módulo
 
-- Las estadísticas de encuestas se incluyen en los **informes del evento** (`GET /api/v1/events/:id/reports`)
-- El `sentimentScore` se calcula mediante análisis básico de texto en respuestas abiertas
-- `responseRate` = total de encuestas enviadas / total de participantes acreditados
+- **Validación:** esquemas Zod para `SurveyResponse` y `Survey`, validar tipo de respuesta según tipo de pregunta
+- **Respuestas de error:** seguir formato de `Contracts.md` (`NOT_FOUND`, `INSUFFICIENT_PERMISSIONS`, `CONFLICT`, `VALIDATION_ERROR`)
+- **Paginación:** seguir formato estándar con `meta` (page, limit, total, totalPages)
+- **Máximo 200 líneas por archivo** (siguiendo estándares del proyecto)
+- **Máximo 3 niveles de anidamiento** por función
+- **Convención de Commits:** Conventional Commits (`feat:`, `fix:`, etc.)
+- **Persistencia:** respuestas se almacenan como JSON en campo de base de datos o tabla separada SurveyResponse
+- **Relaciones:** Survey → Event (N:1), Survey → User (N:1), Survey → SurveyResponse (1:N)
+- **Anonimización:** en listados públicos, no exponer datos personales del encuestado
+
+---
+
+## 5. Plan de Tareas
+
+| # | Tarea | Tipo | Prioridad | Dependencias |
+|---|-------|------|-----------|--------------|
+| 1 | Crear esquema Prisma para Survey y SurveyResponse | Backend | Alta | - |
+| 2 | Implementar esquemas Zod para validación de encuestas | Backend | Alta | - |
+| 3 | Implementar endpoint POST /api/v1/events/:id/surveys | Backend | Alta | 1, 2 |
+| 4 | Verificar inscripción y acreditación antes de permitir encuesta | Backend | Alta | 3 |
+| 5 | Verificar que el evento haya finalizado | Backend | Alta | 4 |
+| 6 | Implementar endpoint GET /api/v1/events/:id/surveys | Backend | Alta | 1 |
+| 7 | Implementar paginación para listado de encuestas | Backend | Alta | 6 |
+| 8 | Implementar endpoint GET /api/v1/events/:id/surveys/stats | Backend | Alta | 1 |
+| 9 | Calcular ratingDistribution y averageRating | Backend | Media | 8 |
+| 10 | Calcular topKeywords de respuestas de texto | Backend | Media | 8 |
+| 11 | Calcular sentimentScore | Backend | Media | 8 |
+| 12 | Proteger endpoints con middlewares de roles | Backend | Alta | 3-11 |
+| 13 | Crear tests unitarios para validaciones | Test | Alta | 2 |
+| 14 | Crear tests de integración para endpoints | Test | Alta | 3-12 |
+| 15 | Crear formulario de encuesta en frontend | Frontend | Alta | 3 |
+| 16 | Crear vista de estadísticas para organizador | Frontend | Media | 8 |
+
+---
+
+## 6. Estrategia de Verificación
+
+### Tests Unitarios
+- Esquemas Zod: verificar que aceptan respuestas válidas y rechazan inválidas
+- Cálculo de `averageRating`: verificar promedio correcto con distintos inputs
+- Cálculo de `ratingDistribution`: verificar conteo correcto por valor
+- Cálculo de `responseRate`: verificar división encuestas/acreditados
+
+### Tests de Integración
+- POST /surveys: envío exitoso, duplicado (409), no acreditado (403), evento no finalizado (409)
+- GET /surveys: listado paginado correcto, acceso no autorizado (403)
+- GET /surveys/stats: estadísticas correctas con datos de prueba, acceso no autorizado (403)
+
+### Tests E2E
+- Flujo completo: evento finaliza → participante acreditado envía encuesta → organizador ve respuestas y estadísticas
+- Verificar que un participante no acreditado no puede enviar encuesta
+- Verificar que un organizador de otro evento no puede ver las encuestas
+
+### Criterios de Calidad
+- Cobertura de tests mínima: 80%
+- Todas las respuestas siguen formato de `Contracts.md`
+- Zero errores de validación no manejados
+- Linting y typecheck sin errores
+- Estadísticas calculadas correctamente con datos de prueba

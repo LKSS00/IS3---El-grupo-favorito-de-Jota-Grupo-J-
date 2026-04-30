@@ -1,236 +1,84 @@
 # Roles Spec
 
-## Enum UserRole
+## 1. Objetivo y Contexto
 
-| Valor | Descripción |
-|-------|-------------|
-| `admin` | Administrador de la plataforma |
-| `organizer` | Organizador de eventos |
-| `speaker` | Disertante / Expositor |
-| `participant` | Participante |
+El módulo de roles gestiona el control de acceso basado en roles (RBAC) para la plataforma **Academic Event Manager**. Define los permisos de cada tipo de usuario sobre los recursos del sistema y proporciona middleware para proteger rutas. Los roles determinan qué acciones puede realizar un usuario en cada módulo de la plataforma.
+
+**Roles disponibles:** `admin`, `organizer`, `speaker`, `participant`.
 
 ---
 
-## Permisos por Rol
+## 2. Historias de Usuario y Criterios de Aceptación
 
-### Admin
+### HU-R1: Admin gestiona usuarios y roles
 
-| Recurso | Crear | Leer | Actualizar | Eliminar |
-|---------|-------|------|------------|----------|
-| Usuarios | Sí | Sí | Sí | Sí |
-| Eventos | Sí | Sí | Sí | Sí |
-| Inscripciones | Sí | Sí | Sí | Sí |
-| Encuestas | No | Sí | No | No |
-| Certificados | No | Sí | No | No |
-| Roles | Sí | Sí | Sí | Sí |
+**Como** administrador de la plataforma, **quiero** asignar y revocar roles a los usuarios, **para** controlar su nivel de acceso.
 
-- Acceso total a la plataforma
-- Gestión de usuarios y asignación de roles
-- Puede eliminar cualquier evento
-- Acceso a métricas globales
+**Criterios de aceptación:**
+- El admin puede crear, leer, actualizar y eliminar cualquier usuario
+- El admin puede asignar roles adicionales a cualquier usuario
+- El admin puede eliminar cualquier evento de la plataforma
+- El admin tiene acceso a métricas globales de todos los eventos
 
-### Organizer
+### HU-R2: Organizador gestiona sus eventos
 
-| Recurso | Crear | Leer | Actualizar | Eliminar |
-|---------|-------|------|------------|----------|
-| Eventos propios | Sí | Sí | Sí | Sí |
-| Eventos de otros | No | Sí (públicos) | No | No |
-| Inscripciones (sus eventos) | Sí | Sí | Sí | No |
-| Acreditación (sus eventos) | Sí | Sí | Sí | No |
-| Encuestas (sus eventos) | No | Sí | No | No |
-| Certificados (sus eventos) | Sí | Sí | No | No |
-| Informes (sus eventos) | Sí | Sí | No | No |
+**Como** organizador, **quiero** crear y administrar mis propios eventos, **para** gestionar inscripciones, acreditar participantes y generar informes.
 
-- CRUD completo de sus propios eventos
-- Acreditar participantes en sus eventos
-- Ver inscripciones y estadísticas de sus eventos
-- Generar certificados e informes
+**Criterios de aceptación:**
+- Puede crear, editar y eliminar sus propios eventos
+- Puede ver inscripciones y acreditar participantes de sus eventos
+- Puede ver encuestas y generar informes de sus eventos
+- No puede modificar eventos de otros organizadores
+- Puede generar certificados para asistentes de sus eventos
 
-### Speaker
+### HU-R3: Disertante accede a sus eventos asignados
 
-| Recurso | Crear | Leer | Actualizar | Eliminar |
-|---------|-------|------|------------|----------|
-| Eventos asignados | No | Sí | No | No |
-| Perfil | No | Sí | Sí | No |
-| Certificado de disertante | No | Sí | No | No |
+**Como** disertante, **quiero** ver los eventos donde fui asignado, **para** consultar detalles y descargar mi certificado.
 
-- Ver eventos donde fue asignado como disertante
-- Gestionar su perfil
-- Descargar certificado de disertante
+**Criterios de aceptación:**
+- Puede ver solo los eventos donde fue asignado como speaker
+- Puede gestionar su perfil
+- Puede descargar su certificado de disertante
+- No puede modificar eventos ni inscripciones
 
-### Participant
+### HU-R4: Participante se inscribe y gestiona su experiencia
 
-| Recurso | Crear | Leer | Actualizar | Eliminar |
-|---------|-------|------|------------|----------|
-| Eventos | No | Sí (públicos) | No | No |
-| Inscripciones propias | Sí | Sí | No | Sí (cancelar) |
-| Certificados propios | No | Sí | No | No |
-| Encuestas | Sí | No | No | No |
+**Como** participante, **quiero** inscribirme a eventos, ver mis certificados y enviar encuestas, **para** participar activamente en la plataforma.
 
-- Inscribirse a eventos públicos
-- Cancelar su propia inscripción
-- Descargar sus certificados
-- Enviar encuestas post-evento
+**Criterios de aceptación:**
+- Puede inscribirse a eventos públicos
+- Puede cancelar su propia inscripción
+- Puede ver y descargar sus certificados
+- Puede enviar encuestas post-evento (una por evento)
+- Solo puede ver sus propios datos, no los de otros usuarios
+
+### HU-R5: Usuario con múltiples roles cambia de contexto
+
+**Como** usuario con múltiples roles, **quiero** cambiar mi rol activo, **para** acceder a las funcionalidades correspondientes a cada rol.
+
+**Criterios de aceptación:**
+- Puede tener múltiples roles asignados simultáneamente
+- El JWT contiene un único rol activo
+- Puede cambiar su rol activo mediante `POST /api/v1/users/me/role`
+- Solo puede activar roles que le fueron asignados previamente
 
 ---
 
-## Middleware de Roles
+## 3. Requisitos Funcionales y Reglas de Negocio
 
-### requireRole(role)
-
-Verifica que el usuario tenga exactamente el rol especificado.
-
-```typescript
-function requireRole(role: UserRole) {
-  return async (req: Request, res: Response, next: NextFunction) => {
-    const userRole = req.user.role;
-    if (userRole !== role) {
-      return res.status(403).json({
-        success: false,
-        error: {
-          code: "INSUFFICIENT_PERMISSIONS",
-          message: "No tiene permisos para realizar esta acción",
-        },
-      });
-    }
-    next();
-  };
-}
+### RF-R1: Jerarquía de permisos
 ```
-
-**Uso:**
-
-```typescript
-app.post("/api/v1/events", requireRole("organizer"), createEventHandler);
+admin (4) > organizer (3) > speaker (2) > participant (1)
 ```
-
-### requireAnyRole(roles[])
-
-Verifica que el usuario tenga al menos uno de los roles especificados.
-
-```typescript
-function requireAnyRole(roles: UserRole[]) {
-  return async (req: Request, res: Response, next: NextFunction) => {
-    const userRole = req.user.role;
-    if (!roles.includes(userRole)) {
-      return res.status(403).json({
-        success: false,
-        error: {
-          code: "INSUFFICIENT_PERMISSIONS",
-          message: "No tiene permisos para realizar esta acción",
-        },
-      });
-    }
-    next();
-  };
-}
-```
-
-**Uso:**
-
-```typescript
-app.delete("/api/v1/events/:id", requireAnyRole(["organizer", "admin"]), deleteEventHandler);
-```
-
-### requireOwnerOrAdmin(resourceOwnerId)
-
-Verifica que el usuario sea el dueño del recurso o admin.
-
-```typescript
-function requireOwnerOrAdmin(ownerIdField: string) {
-  return async (req: Request, res: Response, next: NextFunction) => {
-    const userId = req.user.sub;
-    const userRole = req.user.role;
-
-    if (userRole === "admin") return next();
-
-    const resourceOwnerId = req[ownerIdField];
-    if (userId !== resourceOwnerId) {
-      return res.status(403).json({
-        success: false,
-        error: {
-          code: "INSUFFICIENT_PERMISSIONS",
-          message: "No tiene permisos para realizar esta acción",
-        },
-      });
-    }
-    next();
-  };
-}
-```
-
----
-
-## Múltiples Roles por Usuario
-
-Un usuario puede tener **múltiples roles** asociados, pero el JWT contiene un **rol activo**.
-
-### Modelo User-Role
-
-```typescript
-interface UserRoleAssignment {
-  id: string;           // UUID
-  userId: string;       // UUID - FK a User
-  role: UserRole;
-  assignedBy: string;   // UUID - FK a User (admin)
-  assignedAt: Date;
-  isActive: boolean;
-}
-```
-
-### Cambio de Rol Activo
-
-El rol activo se determina en el momento del login y se incluye en el JWT. Para cambiar de rol activo:
-
-```
-POST /api/v1/users/me/role
-{
-  "role": "organizer"
-}
-```
-
-Solo roles previamente asignados al usuario pueden ser activados.
-
----
-
-## Jerarquía de Permisos
-
-```
-admin > organizer > speaker > participant
-```
-
 - `admin` tiene implícitamente todos los permisos de roles inferiores
-- `organizer` tiene permisos de `participant` + gestión de eventos
-- `speaker` tiene permisos de `participant` + acceso a contenido de disertante
+- La comparación se realiza mediante función `hasPermission(userRole, requiredRole)`
 
-### Función de Comparación
+### RF-R2: Middlewares de protección
+- `requireRole(role)`: verifica rol exacto
+- `requireAnyRole(roles[])`: verifica al menos uno de los roles
+- `requireOwnerOrAdmin(ownerIdField)`: verifica propiedad o rol admin
 
-```typescript
-function hasPermission(userRole: UserRole, requiredRole: UserRole): boolean {
-  const hierarchy: Record<UserRole, number> = {
-    admin: 4,
-    organizer: 3,
-    speaker: 2,
-    participant: 1,
-  };
-  return hierarchy[userRole] >= hierarchy[requiredRole];
-}
-```
-
----
-
-## Casos de Error
-
-| Código | HTTP | Escenario |
-|--------|------|-----------|
-| `INSUFFICIENT_PERMISSIONS` | 403 | Rol no tiene permisos para la acción |
-| `INVALID_TOKEN` | 401 | Token inválido o expirado |
-| `AUTH_REQUIRED` | 401 | No autenticado |
-| `NOT_FOUND` | 404 | Recurso no encontrado (oculta información si no tiene permisos) |
-
----
-
-## Protección de Rutas por Módulo
+### RF-R3: Tabla de permisos por módulo
 
 | Módulo | Endpoint | Roles Permitidos |
 |--------|----------|-----------------|
@@ -247,3 +95,91 @@ function hasPermission(userRole: UserRole, requiredRole: UserRole): boolean {
 | Surveys | `POST /api/v1/events/:id/surveys` | participant |
 | Surveys | `GET /api/v1/events/:id/surveys` | organizer (propio), admin |
 | Reports | `GET /api/v1/events/:id/reports` | organizer (propio), admin |
+
+### RF-R4: Modelo de asignación de roles
+```typescript
+interface UserRoleAssignment {
+  id: string;
+  userId: string;
+  role: UserRole;
+  assignedBy: string;
+  assignedAt: Date;
+  isActive: boolean;
+}
+```
+
+### RB-R1: Un rol no asignado no puede activarse
+Solo roles previamente asignados al usuario pueden ser activados.
+
+### RB-R2: El rol activo se incluye en el JWT
+El payload del JWT contiene el campo `role` con el rol activo del usuario.
+
+### RB-R3: Admin siempre tiene acceso
+El rol `admin` bypass todas las verificaciones de propiedad en middlewares.
+
+---
+
+## 4. Restricciones Técnicas del Módulo
+
+- **Enum UserRole:** definido como tipo TypeScript `admin | organizer | speaker | participant`
+- **Middlewares:** implementar como funciones de orden superior que retornan middleware de Express/Hono
+- **Respuestas de error:** código `INSUFFICIENT_PERMISSIONS` (403) para accesos denegados
+- **JWT:** el rol se extrae del token decodificado en `req.user.role`
+- **Máximo 200 líneas por archivo** (siguiendo estándares del proyecto)
+- **Máximo 3 niveles de anidamiento** por función
+- **Convención de Commits:** Conventional Commits (`feat:`, `fix:`, etc.)
+- **Persistencia:** las asignaciones de roles se almacenan en tabla intermedia User-Role
+- **Sin hardcodeo de roles:** los permisos se definen en configuración, no en lógica dispersa
+
+---
+
+## 5. Plan de Tareas
+
+| # | Tarea | Tipo | Prioridad | Dependencias |
+|---|-------|------|-----------|--------------|
+| 1 | Definir enum UserRole en tipos compartidos | Backend | Alta | - |
+| 2 | Crear esquema Prisma para UserRoleAssignment | Backend | Alta | 1 |
+| 3 | Implementar middleware requireRole | Backend | Alta | 1 |
+| 4 | Implementar middleware requireAnyRole | Backend | Alta | 1 |
+| 5 | Implementar middleware requireOwnerOrAdmin | Backend | Alta | 1 |
+| 6 | Implementar función hasPermission (jerarquía) | Backend | Alta | 1 |
+| 7 | Implementar endpoint POST /api/v1/users/me/role | Backend | Alta | 2 |
+| 8 | Implementar endpoint de asignación de roles (admin) | Backend | Alta | 2 |
+| 9 | Proteger rutas de eventos con middlewares de roles | Backend | Alta | 3-5 |
+| 10 | Proteger rutas de inscripciones con middlewares | Backend | Alta | 3-5 |
+| 11 | Proteger rutas de certificados con middlewares | Backend | Alta | 3-5 |
+| 12 | Proteger rutas de encuestas con middlewares | Backend | Alta | 3-5 |
+| 13 | Proteger rutas de informes con middlewares | Backend | Alta | 3-5 |
+| 14 | Crear tests unitarios para middlewares | Test | Alta | 3-6 |
+| 15 | Crear tests de integración para rutas protegidas | Test | Alta | 9-13 |
+| 16 | Implementar selector de rol en frontend (dashboard) | Frontend | Media | 7 |
+| 17 | Ocultar UI según rol del usuario | Frontend | Media | - |
+
+---
+
+## 6. Estrategia de Verificación
+
+### Tests Unitarios
+- `requireRole`: verifica que solo el rol especificado pasa, otros reciben 403
+- `requireAnyRole`: verifica que al menos uno de los roles pasa
+- `requireOwnerOrAdmin`: verifica que el dueño o admin pasa, otros reciben 403
+- `hasPermission`: verifica jerarquía (admin > organizer > speaker > participant)
+
+### Tests de Integración
+- Un organizer puede crear eventos pero no eliminar eventos de otros
+- Un participant puede inscribirse pero no ver inscripciones de otros
+- Un admin puede acceder a todos los endpoints
+- Un speaker solo ve eventos asignados
+- Cambiar rol activo refleja el nuevo rol en el JWT
+
+### Tests E2E
+- Flujo: admin asigna rol organizer → usuario crea evento → participante se inscribe → organizador acredita
+- Verificar que cada rol ve solo lo que le corresponde en la UI
+- Verificar que los middlewares bloquean correctamente accesos no autorizados
+
+### Criterios de Calidad
+- Cobertura de tests mínima: 80%
+- Todos los endpoints protegidos devuelven `INSUFFICIENT_PERMISSIONS` (403) correctamente
+- Zero accesos indebidos detectados en pruebas de penetración
+- Linting y typecheck sin errores
+- Middlewares documentados con ejemplos de uso
