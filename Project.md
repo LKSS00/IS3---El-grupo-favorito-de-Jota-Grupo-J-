@@ -207,3 +207,4 @@ User ────────────────< Registration >───�
 3. Configurar entorno de desarrollo con Docker Compose
 4. Implementar módulo de autenticación (primer entregable)
 5. Establecer pipeline CI/CD básico
+w
