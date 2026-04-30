@@ -1,388 +1,56 @@
-# Spec-Registration - Academic Event Manager
+# Spec: Módulo de Inscripciones (Registration)
 
-Este documento define las especificaciones funcionales y técnicas del módulo de inscripciones, incluyendo inscripción autónoma, inscripción por personal del evento, manejo de cupos, fechas límite y lista de espera.
+## 1. Objetivo y Contexto
+El objetivo de este módulo es gestionar el proceso mediante el cual los participantes se registran en eventos académicos[cite: 10]. Se debe soportar dos modalidades de inscripción: una autónoma por parte del usuario y otra gestionada manualmente por el personal del evento (organizador/admin)[cite: 10].
 
----
+## 2. Historias de Usuario y Criterios de Aceptación
+**HU-01: Inscripción autónoma**
+Como participante registrado quiero inscribirme a un evento público para asegurar mi lugar[cite: 2, 10].
+*   **CA1:** El usuario solo puede inscribirse si el evento está publicado (`isPublished = true`)[cite: 10].
+*   **CA2:** Si el evento tiene `registrationStart` y `registrationEnd`, la inscripción debe rechazarse con error si está fuera de ese rango[cite: 10].
+*   **CA3:** Si las inscripciones confirmadas alcanzan el `maxCapacity`, la nueva inscripción debe guardarse automáticamente con el estado `waitlist`[cite: 10].
+*   **CA4:** Un usuario no puede inscribirse dos veces al mismo evento (combinación de `userId` y `eventId` debe ser única)[cite: 10].
 
-## Descripción del Módulo
+**HU-02: Inscripción por parte del organizador**
+Como organizador quiero inscribir a un participante manualmente para gestionar excepciones[cite: 2, 10].
+*   **CA1:** La inscripción manual debe ignorar las validaciones de `maxCapacity` (override de cupo)[cite: 10].
+*   **CA2:** La inscripción manual debe ignorar las validaciones de fechas límite de inscripción[cite: 10].
 
-El módulo de inscripciones gestiona el proceso mediante el cual los participantes se registran en eventos académicos. Soporta dos modalidades de inscripción (autónoma y gestionada por organizador), control de cupo mínimo/máximo, validación de fechas límite y sistema de lista de espera.
+## 3. Requisitos Funcionales y Reglas de Negocio
+*   **Estados de inscripción:** Toda inscripción debe manejar los estados `pending`, `confirmed`, `cancelled` o `waitlist`[cite: 10].
+*   **Flujo por defecto:** Toda inscripción autónoma comienza en `pending` y debe pasar a `confirmed` automáticamente si hay cupo disponible[cite: 10].
+*   **Promoción de Waitlist:** Se debe proveer una lógica para promover al primer usuario en lista de espera a `confirmed` si se libera un cupo[cite: 10].
+*   **Endpoints requeridos a implementar:** 
+    *   POST `/api/v1/events/:id/registrations` (Autónoma)[cite: 10].
+    *   POST `/api/v1/events/:id/registrations/admin` (Organizador)[cite: 10].
+    *   GET `/api/v1/events/:id/registrations` (Listado por evento)[cite: 10].
+    *   DELETE `/api/v1/events/:id/registrations/:registrationId` (Cancelar)[cite: 10].
+    *   POST `/api/v1/events/:id/registrations/waitlist/promote` (Promover)[cite: 10].
 
----
+## 4. Restricciones técnicas específicas de este módulo
+*   **Autenticación:** Todos los endpoints de inscripción requieren autenticación mediante token JWT[cite: 10].
+*   **Autorización:** Los endpoints marcados como "Admin/Organizador" deben verificar mediante middleware que el usuario logueado es el dueño del evento o un administrador del sistema[cite: 10].
+*   **Transacciones de BD:** La verificación de cupo (`maxCapacity`) y la posterior inserción del registro deben manejarse dentro de una transacción para evitar condiciones de carrera.
 
-## Reglas de Negocio
+## 5. Modelo de datos de este módulo
+La entidad principal a utilizar será `Registration` integrada a Prisma ORM[cite: 8].
+```prisma
+model Registration {
+  id          String             @id @default(uuid()) @db.Uuid
+  userId      String             @map("user_id") @db.Uuid
+  eventId     String             @map("event_id") @db.Uuid
+  status      RegistrationStatus @default(pending)
+  attended    Boolean            @default(false)
+  notes       String?            @db.Text
+  createdAt   DateTime           @default(now()) @map("created_at")
+  updatedAt   DateTime           @updatedAt @map("updated_at")
 
-### Reglas Generales
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  event Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
 
-| Regla | Descripción |
-|-------|-------------|
-| **Unicidad** | Un usuario solo puede inscribirse una vez por evento (`userId + eventId` únicos) |
-| **Evento publicado** | Solo se puede inscribir en eventos publicados (`isPublished = true`) |
-| **Fechas de inscripción** | Si `registrationStart` y `registrationEnd` están definidos, la inscripción solo es válida dentro de ese rango |
-| **Cupo máximo** | Si `maxCapacity` está alcanzado, nuevas inscripciones van a `waitlist` |
-| **Cupo mínimo** | El evento se confirma cuando las inscripciones confirmadas alcanzan `minCapacity` |
-| **Estado inicial** | Toda inscripción comienza en `pending` y pasa a `confirmed` tras validación automática o del organizador |
-| **Inscripción por organizador** | El organizador puede inscribir participantes sin pasar por validaciones de cupo ni fechas |
-
-### Estados de Inscripción
-
-| Estado | Descripción | Transiciones posibles |
-|--------|-------------|----------------------|
-| `pending` | Inscripción recibida, pendiente de confirmación | `confirmed`, `cancelled` |
-| `confirmed` | Inscripción confirmada, participante aceptado | `cancelled` |
-| `cancelled` | Inscripción cancelada por usuario u organizador | `confirmed` (reactivación) |
-| `waitlist` | Cupo lleno, en lista de espera | `confirmed` (si se libera lugar), `cancelled` |
-
----
-
-## Endpoints
-
-### Inscribirse a Evento (Autónoma)
-
-**POST** `/api/v1/events/:id/registrations`
-
-**Autenticación:** Requerida (cualquier rol)
-
-**Request:**
-```json
-{
-  "notes": "Soy estudiante de Ingeniería en Sistemas."
+  @@unique([userId, eventId])
+  @@index([userId])
+  @@index([eventId])
+  @@index([status])
+  @@map("registrations")
 }
-```
-
-**Response (201):**
-```json
-{
-  "success": true,
-  "data": {
-    "id": "reg-id-uuid",
-    "eventId": "event-id-uuid",
-    "userId": "user-id-uuid",
-    "status": "confirmed",
-    "attended": false,
-    "registeredAt": "2025-06-15T10:30:00.000Z"
-  },
-  "message": "Inscripción realizada exitosamente"
-}
-```
-
-**Errores:**
-
-| Código | HTTP | Condición |
-|--------|------|-----------|
-| `AUTH_REQUIRED` | 401 | No autenticado |
-| `NOT_FOUND` | 404 | Evento no existe |
-| `CONFLICT` | 409 | Ya inscrito en este evento |
-| `VALIDATION_ERROR` | 400 | Inscripción fuera de fechas permitidas |
-
-### Inscribir Participante (Organizador)
-
-**POST** `/api/v1/events/:id/registrations/admin`
-
-**Autenticación:** Requerida (rol `organizer` del evento o `admin`)
-
-**Request:**
-```json
-{
-  "userEmail": "nuevo@ejemplo.com",
-  "firstName": "Ana",
-  "lastName": "Martínez",
-  "notes": "Inscripción manual por organización."
-}
-```
-
-**Lógica:**
-
-| Escenario | Comportamiento |
-|-----------|----------------|
-| Usuario existe | Se crea la inscripción vinculada al usuario |
-| Usuario no existe | Se crea cuenta temporal y luego la inscripción |
-| Cupo lleno | Permite inscripción por encima del cupo (override) |
-| Fuera de fechas | Permite inscripción sin respetar fechas límite |
-
-**Response (201):**
-```json
-{
-  "success": true,
-  "data": {
-    "id": "reg-id-uuid",
-    "eventId": "event-id-uuid",
-    "userId": "user-id-uuid",
-    "status": "confirmed",
-    "attended": false,
-    "registeredBy": "organizer-id-uuid",
-    "registeredAt": "2025-06-15T10:30:00.000Z"
-  },
-  "message": "Participante inscrito exitosamente por el organizador"
-}
-```
-
----
-
-### Listar Inscripciones de un Evento
-
-**GET** `/api/v1/events/:id/registrations`
-
-**Autenticación:** Requerida (organizador del evento o `admin`)
-
-**Query Params:**
-
-| Parámetro | Tipo | Requerido | Default | Descripción |
-|-----------|------|-----------|---------|-------------|
-| `status` | `string` | No | `all` | Filtrar por estado |
-| `page` | `number` | No | 1 | Página |
-| `limit` | `number` | No | 20 | Items por página |
-
-**Response (200):**
-```json
-{
-  "success": true,
-  "data": [
-    {
-      "id": "reg-id-uuid",
-      "user": {
-        "id": "user-id-uuid",
-        "firstName": "Juan",
-        "lastName": "Pérez",
-        "email": "juan@ejemplo.com"
-      },
-      "status": "confirmed",
-      "attended": false,
-      "notes": "Soy estudiante de Ingeniería en Sistemas.",
-      "registeredAt": "2025-06-15T10:30:00.000Z"
-    }
-  ],
-  "meta": {
-    "page": 1,
-    "limit": 20,
-    "total": 142,
-    "totalPages": 8
-  }
-}
-```
-
----
-
-### Obtener Mis Inscripciones
-
-**GET** `/api/v1/users/me/registrations`
-
-**Autenticación:** Requerida
-
-**Response (200):**
-```json
-{
-  "success": true,
-  "data": [
-    {
-      "id": "reg-id-uuid",
-      "event": {
-        "id": "event-id-uuid",
-        "title": "Congreso de Tecnología 2025",
-        "type": "conference",
-        "startDate": "2025-08-15T09:00:00.000Z",
-        "endDate": "2025-08-17T18:00:00.000Z",
-        "status": "upcoming"
-      },
-      "status": "confirmed",
-      "attended": false,
-      "registeredAt": "2025-06-15T10:30:00.000Z"
-    }
-  ]
-}
-```
-
----
-
-### Cancelar Inscripción
-
-**DELETE** `/api/v1/events/:id/registrations/:registrationId`
-
-**Autenticación:** Requerida (usuario propio u organizador)
-
-**Validaciones:**
-
-| Validación | Descripción |
-|------------|-------------|
-| Propiedad | El usuario debe ser el dueño de la inscripción o el organizador |
-| Evento no iniciado | No se puede cancelar si el evento ya comenzó |
-
-**Response (200):**
-```json
-{
-  "success": true,
-  "data": {
-    "id": "reg-id-uuid",
-    "status": "cancelled"
-  },
-  "message": "Inscripción cancelada exitosamente"
-}
-```
-
----
-
-### Confirmar Inscripción (Organizador)
-
-**PATCH** `/api/v1/events/:id/registrations/:registrationId/status`
-
-**Autenticación:** Requerida (organizador del evento o `admin`)
-
-**Request:**
-```json
-{
-  "status": "confirmed"
-}
-```
-
-**Response (200):**
-```json
-{
-  "success": true,
-  "data": {
-    "id": "reg-id-uuid",
-    "status": "confirmed"
-  },
-  "message": "Inscripción confirmada exitosamente"
-}
-```
-
----
-
-### Gestionar Lista de Espera
-
-**GET** `/api/v1/events/:id/registrations/waitlist`
-
-**Autenticación:** Requerida (organizador del evento o `admin`)
-
-**Response (200):**
-```json
-{
-  "success": true,
-  "data": [
-    {
-      "id": "reg-id-uuid",
-      "user": {
-        "firstName": "Ana",
-        "lastName": "Martínez",
-        "email": "ana@ejemplo.com"
-      },
-      "status": "waitlist",
-      "registeredAt": "2025-06-20T14:00:00.000Z",
-      "waitlistPosition": 1
-    }
-  ],
-  "meta": {
-    "total": 8
-  }
-}
-```
-
-#### Promover de Lista de Espera
-
-**POST** `/api/v1/events/:id/registrations/waitlist/promote`
-
-**Autenticación:** Requerida (organizador del evento o `admin`)
-
-**Lógica:** Promueve al primer usuario en la lista de espera a `confirmed`.
-
-**Request:**
-```json
-{
-  "registrationId": "reg-id-uuid"
-}
-```
-
-**Response (200):**
-```json
-{
-  "success": true,
-  "data": {
-    "id": "reg-id-uuid",
-    "status": "confirmed",
-    "promotedAt": "2025-07-01T09:00:00.000Z"
-  },
-  "message": "Participante promovido de lista de espera"
-}
-```
-
----
-
-## Validaciones de Inscripción
-
-### Flujo de Validación (Inscripción Autónoma)
-
-```
-1. ¿Usuario autenticado? ──NO──> Error: AUTH_REQUIRED
-        │ SÍ
-        ▼
-2. ¿Evento existe y publicado? ──NO──> Error: NOT_FOUND
-        │ SÍ
-        ▼
-3. ¿Ya inscrito? ──SÍ──> Error: CONFLICT
-        │ NO
-        ▼
-4. ¿Dentro de fechas de inscripción? ──NO──> Error: VALIDATION_ERROR
-        │ SÍ o no definido
-        ▼
-5. ¿Cupo disponible? ──NO──> Estado: waitlist
-        │ SÍ
-        ▼
-6. Crear inscripción → Estado: confirmed
-```
-
-### Tabla de Reglas de Cupo
-
-| Condición | Resultado |
-|-----------|-----------|
-| `maxCapacity` no definido | Inscripción directa → `confirmed` |
-| `maxCapacity` definido y disponible | Inscripción → `confirmed` |
-| `maxCapacity` alcanzado | Inscripción → `waitlist` |
-| `minCapacity` alcanzado | Evento se confirma automáticamente |
-| Inscripción por organizador | Override de cupo → `confirmed` |
-
----
-
-## Casos de Uso
-
-### Caso 1: Inscripción autónoma con cupo disponible
-
-```
-POST /api/v1/events/a1b2c3d4/registrations
-Body: { "notes": "Me interesa el tema de IA." }
-→ Estado: confirmed
-```
-
-### Caso 2: Inscripción autónoma con cupo lleno
-
-```
-POST /api/v1/events/a1b2c3d4/registrations
-Body: {}
-→ Estado: waitlist (maxCapacity alcanzado)
-```
-
-### Caso 3: Inscripción fuera de fecha
-
-```
-POST /api/v1/events/a1b2c3d4/registrations
-→ Error: VALIDATION_ERROR (registrationEnd ya pasó)
-```
-
-### Caso 4: Organizador inscribe participante manualmente
-
-```
-POST /api/v1/events/a1b2c3d4/registrations/admin
-Body: {
-  "userEmail": "invitado@ejemplo.com",
-  "firstName": "Roberto",
-  "lastName": "Fernández"
-}
-→ Estado: confirmed (override de cupo y fechas)
-```
-
-### Caso 5: Promover desde lista de espera
-
-```
-POST /api/v1/events/a1b2c3d4/registrations/waitlist/promote
-Body: { "registrationId": "waitlist-reg-id" }
-→ Estado: waitlist → confirmed
-```
