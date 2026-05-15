@@ -1,1 +1,3 @@
 Se comenzó a trabajar sobre el issue A1
+
+Cierra el issue A1
