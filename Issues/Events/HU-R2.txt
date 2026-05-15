@@ -1,1 +1,3 @@
 Se comenzó a trabajar sobre el issue R2
+
+Se cierra el issue R2
