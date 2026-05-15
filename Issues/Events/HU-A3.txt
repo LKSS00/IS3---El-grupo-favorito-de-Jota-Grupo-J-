@@ -1,1 +1,3 @@
 Se comenzó a trabajar sobre el issue A3
+
+Se completó el issue A3
