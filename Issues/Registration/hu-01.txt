@@ -1,0 +1,3 @@
+Se comenzó a trabajar en el issue HU-01 del módulo Registration.
+
+Issue "solucionado"
