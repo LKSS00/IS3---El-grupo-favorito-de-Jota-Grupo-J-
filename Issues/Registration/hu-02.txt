@@ -1,1 +1,3 @@
 Se comenzó a trabajar con el issue #2
+
+Aquí se termina el trabajo sobre el issue
